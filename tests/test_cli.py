@@ -3,7 +3,15 @@ from pathlib import Path
 import runpy
 
 from tiny_code_agent.llm import LLMProviderError
-from tiny_code_agent.cli import TerminalUI, _normalize_user_input, _thinking_phrase, build_parser, main
+from tiny_code_agent.cli import (
+    TerminalUI,
+    _normalize_user_input,
+    _parse_tool_trace,
+    _summarize_text,
+    _thinking_phrase,
+    build_parser,
+    main,
+)
 
 
 def test_parser_has_workspace_and_model_options() -> None:
@@ -24,10 +32,11 @@ def test_parser_accepts_list_models_flag() -> None:
 
 def test_parser_accepts_provider_listing_and_completion_flags() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--list-providers", "--generate-completion", "bash"])
+    args = parser.parse_args(["--list-providers", "--generate-completion", "bash", "--plain"])
 
     assert args.list_providers is True
     assert args.generate_completion == "bash"
+    assert args.plain is True
 
 
 def test_list_models_prints_supported_models(monkeypatch) -> None:
@@ -55,6 +64,7 @@ def test_generate_completion_prints_bash_script(monkeypatch) -> None:
     assert main(["--generate-completion", "bash"]) == 0
     assert "_tiny_code_agent_completions()" in stdout.getvalue()
     assert "--list-providers" in stdout.getvalue()
+    assert "--plain" in stdout.getvalue()
     assert "gpt-5-mini" in stdout.getvalue()
     assert "gpt-5-nano" in stdout.getvalue()
 
@@ -155,10 +165,38 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     output = stdout.getvalue()
     assert "Tiny Code Agent v0.1" in output
     assert "Provider: openai" in output
-    assert 'Tool: read_file {"path": "README.md"}' in output
+    assert "Tool: read_file" in output
+    assert "  path: README.md" in output
     assert "Assistant: Done." in output
     assert "\033[" not in output
     assert "Error: quota exceeded" in stderr.getvalue()
+
+
+def test_terminal_ui_summarizes_multiline_tool_text() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.tool('tool: edit_file {"path": "a.txt", "new_str": "line 1\\nline 2"}')
+
+    output = stdout.getvalue()
+    assert "Tool: edit_file" in output
+    assert "  path: a.txt" in output
+    assert "  new_str: line 1\\nline 2" in output
+
+
+def test_terminal_ui_renders_tool_result_status() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.tool('tool_result: edit_file {"ok": true, "path": "/tmp/a.txt"}')
+    ui.tool('tool_result: read_file {"ok": false, "error": "file_not_found"}')
+
+    output = stdout.getvalue()
+    assert "result: ok" in output
+    assert "path: /tmp/a.txt" in output
+    assert "result: error: file_not_found" in output
 
 
 def test_terminal_ui_write_prompt_renders_once() -> None:
@@ -214,6 +252,21 @@ def test_terminal_ui_disables_color_with_no_color(monkeypatch) -> None:
     ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
 
     assert "\033[" not in stdout.getvalue()
+
+
+def test_terminal_ui_plain_flag_disables_tty_color_and_thinking(monkeypatch) -> None:
+    stdout = FakeTTY()
+    stderr = FakeTTY()
+
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+    ui.start_thinking("create a file")
+    ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
+
+    assert "\033[" not in stdout.getvalue()
+    assert "Sketching" not in stdout.getvalue()
 
 
 def test_cli_reports_invalid_provider_from_factory(monkeypatch) -> None:
@@ -298,6 +351,35 @@ def test_cli_shows_thinking_indicator_on_tty(monkeypatch) -> None:
     assert "Assistant" in stdout.getvalue()
 
 
+def test_cli_supports_session_commands(monkeypatch) -> None:
+    stdout = StringIO()
+    inputs = iter(["/help", "/models", "/workspace", "/exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert main([]) == 0
+    output = stdout.getvalue()
+    assert "Commands: /help, /models, /workspace, /exit" in output
+    assert "openai: gpt-5-mini (default), gpt-5-nano" in output
+    assert "Workspace:" in output
+
+
+def test_cli_reports_unknown_session_command(monkeypatch) -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    inputs = iter(["/wat", "exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr("sys.stderr", stderr)
+
+    assert main([]) == 0
+    assert "Unknown command: /wat" in stderr.getvalue()
+
+
 def test_cli_normalizes_accidental_prompt_prefix(monkeypatch) -> None:
     class FakeClient:
         provider_name = "fake"
@@ -341,6 +423,20 @@ def test_thinking_phrase_varies_by_request(monkeypatch) -> None:
     assert _thinking_phrase("read the readme") == "Pulling the thread..."
     assert _thinking_phrase("find the tests") == "Following the breadcrumbs..."
     assert _thinking_phrase("hello there") == "Piecing it together..."
+
+
+def test_tool_trace_helpers_format_common_cases() -> None:
+    name, arguments = _parse_tool_trace(
+        'tool: edit_file {"path": "hello.py", "old_str": "", "new_str": "hello"}'
+    )
+
+    assert name == "edit_file"
+    assert arguments == {"path": "hello.py", "old_str": "", "new_str": "hello"}
+    assert _parse_tool_trace("tool: list_files")[1] == {}
+    assert _parse_tool_trace("tool: read_file {bad")[1] == {"arguments": "{bad"}
+    assert _parse_tool_trace('tool: demo ["x"]')[1] == {"arguments": ["x"]}
+    assert _summarize_text("short") == "short"
+    assert _summarize_text("a" * 90) == ("a" * 77) + "..."
 
 
 def test_module_entrypoint_calls_main(monkeypatch) -> None:

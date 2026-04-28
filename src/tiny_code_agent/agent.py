@@ -56,6 +56,9 @@ class CodingAgent:
                         f"tool: {call.name} {json.dumps(call.arguments, ensure_ascii=False)}"
                     )
                     result = dispatch_tool(self.registry, call.name, call.arguments)
+                    self.printer(
+                        f"tool_result: {call.name} {json.dumps(result, ensure_ascii=False)}"
+                    )
                     tool_message = self.client.tool_result_message(
                         ToolCallResult(call_id=call.id, name=call.name, output=result)
                     )
