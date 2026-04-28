@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import random
 import sys
 import time
+from typing import Any
 from pathlib import Path
 
 from .agent import CodingAgent
@@ -22,10 +24,11 @@ from .tools import build_tool_registry
 
 
 class TerminalUI:
-    def __init__(self, *, stdout, stderr) -> None:
+    def __init__(self, *, stdout, stderr, plain: bool = False) -> None:
         self.stdout = stdout
         self.stderr = stderr
-        self.use_color = _supports_color(stdout) and not os.environ.get("NO_COLOR")
+        self.plain = plain
+        self.use_color = _supports_color(stdout) and not os.environ.get("NO_COLOR") and not plain
         self.use_animation = self.use_color and _is_tty(stdout)
         self.thinking_active = False
         self.separate_next_prompt = False
@@ -47,7 +50,24 @@ class TerminalUI:
 
     def tool(self, message: str) -> None:
         self.stop_thinking()
-        self.line(f"{self._tool('Tool')} {message.removeprefix('tool: ').strip()}")
+        if message.startswith("tool_result:"):
+            self.tool_result(message)
+            return
+        name, arguments = _parse_tool_trace(message)
+        self.line(f"{self._tool('Tool')} {name}")
+        for key, value in arguments.items():
+            if key == "new_str" and isinstance(value, str):
+                value = _summarize_text(value)
+            self.line(f"  {key}: {value}")
+        self.separate_next_prompt = False
+
+    def tool_result(self, message: str) -> None:
+        name, result = _parse_tool_trace(message.removeprefix("tool_result:").strip())
+        status = "ok" if result.get("ok") else f"error: {result.get('error', 'unknown')}"
+        self.line(f"  result: {status}")
+        path = result.get("path")
+        if path:
+            self.line(f"  path: {path}")
         self.separate_next_prompt = False
 
     def assistant(self, message: str) -> None:
@@ -61,7 +81,7 @@ class TerminalUI:
         self.separate_next_prompt = True
 
     def start_thinking(self, user_input: str) -> None:
-        if self.thinking_active or not _is_tty(self.stdout):
+        if self.thinking_active or self.plain or not _is_tty(self.stdout):
             return
         self.thinking_active = True
         self.line(self._muted(_thinking_phrase(user_input)))
@@ -197,6 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["bash", "zsh"],
         help="Print a shell completion script for tiny-code-agent, then exit.",
     )
+    parser.add_argument(
+        "--plain",
+        action="store_true",
+        help="Disable colors, animation, and thinking phrases for plain terminal output.",
+    )
     return parser
 
 
@@ -247,7 +272,7 @@ def _completion_script(shell: str) -> str:
             ;;
     esac
 
-    COMPREPLY=( $(compgen -W "--workspace --provider --model --list-models --list-providers --generate-completion" -- "$cur") )
+    COMPREPLY=( $(compgen -W "--workspace --provider --model --list-models --list-providers --generate-completion --plain" -- "$cur") )
 }}
 
 complete -F _tiny_code_agent_completions tiny-code-agent
@@ -260,25 +285,67 @@ _tiny_code_agent() {{
   providers=({providers})
   models=({models})
 
-  _arguments \\
+    _arguments \\
     '--workspace[Workspace root the agent may read and edit]:workspace:_files' \\
     '--provider[LLM provider to use]:provider:({providers})' \\
     '--model[LLM model name]:model:({models})' \\
     '--list-models[Print the providers and known models supported by this CLI]' \\
     '--list-providers[Print the supported providers]' \\
-    '--generate-completion[Print a shell completion script]:shell:(bash zsh)'
+    '--generate-completion[Print a shell completion script]:shell:(bash zsh)' \\
+    '--plain[Disable colors, animation, and thinking phrases]'
 }}
 
 compdef _tiny_code_agent tiny-code-agent
 """
 
 
+def _parse_tool_trace(message: str) -> tuple[str, dict[str, Any]]:
+    trace = message.removeprefix("tool: ").strip()
+    name, _, raw_arguments = trace.partition(" ")
+    if not raw_arguments:
+        return name, {}
+    try:
+        arguments = json.loads(raw_arguments)
+    except json.JSONDecodeError:
+        return name, {"arguments": raw_arguments}
+    if isinstance(arguments, dict):
+        return name, arguments
+    return name, {"arguments": arguments}
+
+
+def _summarize_text(text: str, limit: int = 80) -> str:
+    normalized = text.replace("\n", "\\n")
+    if len(normalized) <= limit:
+        return normalized
+    return f"{normalized[: limit - 3]}..."
+
+
+def _handle_command(command: str, *, ui: TerminalUI, provider: str, model: str, workspace: Path) -> bool:
+    normalized = command.strip().lower()
+    if normalized in {"/exit", "/quit"}:
+        raise SystemExit(0)
+    if normalized == "/help":
+        ui.line("Commands: /help, /models, /workspace, /exit, /quit")
+        return True
+    if normalized == "/models":
+        for provider_name in supported_providers():
+            ui.line(f"{provider_name}: {_format_models(provider_name)}")
+        return True
+    if normalized == "/workspace":
+        ui.line(f"Provider: {provider}")
+        ui.line(f"Model: {model}")
+        ui.line(f"Workspace: {workspace}")
+        return True
+    ui.error(f"Unknown command: {command}")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(Path(".env"))
-    ui = TerminalUI(stdout=sys.stdout, stderr=sys.stderr)
 
     parser = build_parser()
     args = parser.parse_args(argv)
+    ui = TerminalUI(stdout=sys.stdout, stderr=sys.stderr, plain=args.plain)
 
     if args.list_providers:
         _print_supported_providers()
@@ -323,6 +390,18 @@ def main(argv: list[str] | None = None) -> int:
         user_input = _normalize_user_input(user_input)
         if user_input.lower() in {"exit", "quit"}:
             return 0
+        if user_input.startswith("/"):
+            try:
+                if _handle_command(
+                    user_input,
+                    ui=ui,
+                    provider=args.provider,
+                    model=args.model,
+                    workspace=workspace,
+                ):
+                    continue
+            except SystemExit as exc:
+                return int(exc.code)
         if not user_input:
             continue
 

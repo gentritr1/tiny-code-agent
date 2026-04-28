@@ -55,7 +55,13 @@ class FakeClient:
 
 def test_agent_executes_tool_and_returns_final_answer(tmp_path: Path) -> None:
     client = FakeClient()
-    agent = CodingAgent(client=client, model="test-model", registry=build_tool_registry(tmp_path))
+    printed: list[str] = []
+    agent = CodingAgent(
+        client=client,
+        model="test-model",
+        registry=build_tool_registry(tmp_path),
+        printer=printed.append,
+    )
 
     answer = agent.ask("create hello.py")
 
@@ -65,6 +71,8 @@ def test_agent_executes_tool_and_returns_final_answer(tmp_path: Path) -> None:
     assert client.messages[-1][-1]["content"]["action"] == "created_file"
     assert client.messages[0] == [{"role": "user", "content": "create hello.py"}]
     assert client.previous_response_ids == [None, "resp_1"]
+    assert printed[0].startswith("tool: edit_file")
+    assert printed[1].startswith("tool_result: edit_file")
 
 
 class FailingClient:
