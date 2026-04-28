@@ -31,11 +31,16 @@ Add your API key to `.env` or export it in your shell:
 export OPENAI_API_KEY="sk-your-api-key"
 ```
 
-Optional model override:
+Optional provider/model override:
 
 ```bash
+export TINY_CODE_AGENT_PROVIDER="openai"
 export TINY_CODE_AGENT_MODEL="gpt-5.5"
 ```
+
+The core agent is provider-agnostic. OpenAI is the first implemented provider,
+and the provider adapter layer is designed so Anthropic, DeepSeek, or another
+tool-calling LLM can be added without changing the local file tools.
 
 ## Run
 

@@ -3,9 +3,10 @@ from tiny_code_agent.cli import build_parser, main
 
 def test_parser_has_workspace_and_model_options() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--workspace", ".", "--model", "test-model"])
+    args = parser.parse_args(["--workspace", ".", "--provider", "openai", "--model", "test-model"])
 
     assert args.workspace == "."
+    assert args.provider == "openai"
     assert args.model == "test-model"
 
 
