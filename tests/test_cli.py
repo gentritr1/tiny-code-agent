@@ -1,4 +1,6 @@
 from io import StringIO
+from pathlib import Path
+import runpy
 
 from tiny_code_agent.llm import LLMProviderError
 from tiny_code_agent.cli import TerminalUI, build_parser, main
@@ -154,3 +156,101 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     assert "Assistant: Done." in output
     assert "\033[" not in output
     assert "Error: quota exceeded" in stderr.getvalue()
+
+
+class FakeTTY(StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def test_terminal_ui_uses_color_and_animation_on_tty(monkeypatch) -> None:
+    stdout = FakeTTY()
+    stderr = FakeTTY()
+    sleeps: list[float] = []
+
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("tiny_code_agent.cli.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+    ui.banner(provider="openai", model="gpt-5.5", workspace=Path("/tmp/demo"))
+    ui.tool('tool: read_file {"path": "README.md"}')
+    ui.assistant("Done.")
+    ui.error("quota exceeded")
+
+    output = stdout.getvalue()
+    assert "\033[" in output
+    assert "Starting" in output
+    assert "Tiny Code Agent v0.1" in output
+    assert 'Tool' in output
+    assert len(sleeps) == 3
+    assert "\033[" in stderr.getvalue()
+
+
+def test_terminal_ui_disables_color_with_no_color(monkeypatch) -> None:
+    stdout = FakeTTY()
+    stderr = FakeTTY()
+
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("NO_COLOR", "1")
+
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+    ui.banner(provider="openai", model="gpt-5.5", workspace=Path("/tmp/demo"))
+
+    assert "\033[" not in stdout.getvalue()
+
+
+def test_cli_reports_invalid_provider_from_factory(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: (_ for _ in ()).throw(ValueError("unsupported provider 'bad'")))
+
+    try:
+        main(["--provider", "openai"])
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("expected SystemExit")
+
+
+def test_cli_returns_cleanly_on_eof(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("builtins.input", lambda prompt: (_ for _ in ()).throw(EOFError()))
+
+    assert main([]) == 0
+
+
+def test_cli_skips_empty_input_and_prints_assistant_reply(monkeypatch) -> None:
+    class FakeClient:
+        provider_name = "fake"
+
+        def complete(self, **kwargs):
+            return __import__("tiny_code_agent.llm").llm.AssistantTurn(
+                messages=[{"role": "assistant", "content": "Hi"}],
+                text="Hi",
+                tool_calls=[],
+            )
+
+        def tool_result_message(self, result):
+            raise AssertionError("tool_result_message should not be called")
+
+    stdout = StringIO()
+    inputs = iter(["", "hello", "exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FakeClient())
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert main([]) == 0
+    assert "Assistant: Hi" in stdout.getvalue()
+
+
+def test_module_entrypoint_calls_main(monkeypatch) -> None:
+    monkeypatch.setattr("tiny_code_agent.cli.main", lambda: 7)
+
+    try:
+        runpy.run_module("tiny_code_agent.__main__", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 7
+    else:
+        raise AssertionError("expected SystemExit")

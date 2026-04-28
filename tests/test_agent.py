@@ -88,3 +88,37 @@ def test_agent_rolls_back_failed_turn_from_history(tmp_path: Path) -> None:
         raise AssertionError("expected LLMProviderError")
 
     assert agent.messages == []
+
+
+class LoopingClient:
+    provider_name = "fake"
+
+    def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[Any],
+        instructions: str,
+    ) -> AssistantTurn:
+        return AssistantTurn(
+            messages=[{"role": "assistant", "content": "Still working."}],
+            text="",
+            tool_calls=[ToolCall(id="loop", name="missing_tool", arguments={})],
+        )
+
+    def tool_result_message(self, result: ToolCallResult) -> dict[str, Any]:
+        return {
+            "role": "tool",
+            "tool_call_id": result.call_id,
+            "name": result.name,
+            "content": result.output,
+        }
+
+
+def test_agent_stops_when_tool_loop_limit_is_hit(tmp_path: Path) -> None:
+    agent = CodingAgent(client=LoopingClient(), model="test-model", registry=build_tool_registry(tmp_path))
+
+    answer = agent.ask("keep looping")
+
+    assert answer == "Stopped because the tool loop exceeded the safety limit."
