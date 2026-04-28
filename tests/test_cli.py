@@ -1,7 +1,7 @@
 from io import StringIO
 
 from tiny_code_agent.llm import LLMProviderError
-from tiny_code_agent.cli import build_parser, main
+from tiny_code_agent.cli import TerminalUI, build_parser, main
 
 
 def test_parser_has_workspace_and_model_options() -> None:
@@ -134,4 +134,23 @@ def test_cli_reports_provider_errors_without_traceback(monkeypatch) -> None:
 
     assert main([]) == 0
     assert "Traceback" not in stderr.getvalue()
+    assert "Error: quota exceeded" in stderr.getvalue()
+
+
+def test_terminal_ui_plain_rendering_without_tty() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.banner(provider="openai", model="gpt-5.5", workspace=__import__("pathlib").Path("/tmp/demo"))
+    ui.tool('tool: read_file {"path": "README.md"}')
+    ui.assistant("Done.")
+    ui.error("quota exceeded")
+
+    output = stdout.getvalue()
+    assert "Tiny Code Agent v0.1" in output
+    assert "Provider: openai" in output
+    assert 'Tool: read_file {"path": "README.md"}' in output
+    assert "Assistant: Done." in output
+    assert "\033[" not in output
     assert "Error: quota exceeded" in stderr.getvalue()

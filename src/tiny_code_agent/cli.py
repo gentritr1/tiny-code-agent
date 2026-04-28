@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 from .agent import CodingAgent
@@ -17,6 +18,81 @@ from .providers import (
 )
 from .providers.factory import DEFAULT_PROVIDER
 from .tools import build_tool_registry
+
+
+class TerminalUI:
+    def __init__(self, *, stdout, stderr) -> None:
+        self.stdout = stdout
+        self.stderr = stderr
+        self.use_color = _supports_color(stdout) and not os.environ.get("NO_COLOR")
+        self.use_animation = self.use_color and _is_tty(stdout)
+
+    def banner(self, *, provider: str, model: str, workspace: Path) -> None:
+        self._animate_startup()
+        self.line(self._accent("Tiny Code Agent v0.1"))
+        self.line(f"{self._label('Provider')} {provider}")
+        self.line(f"{self._label('Model')} {model}")
+        self.line(f"{self._label('Workspace')} {workspace}")
+        self.line(f"{self._muted('Type exit or quit to stop.')}")
+
+    def prompt(self) -> str:
+        return f"{self._user('You')} "
+
+    def tool(self, message: str) -> None:
+        self.line(f"{self._tool('Tool')} {message.removeprefix('tool: ').strip()}")
+
+    def assistant(self, message: str) -> None:
+        self.line(f"{self._assistant('Assistant')} {message}")
+
+    def error(self, message: str) -> None:
+        self.line(f"{self._error('Error')} {message}", stream=self.stderr)
+
+    def line(self, text: str = "", *, stream=None) -> None:
+        print(text, file=stream or self.stdout)
+
+    def _animate_startup(self) -> None:
+        if not self.use_animation:
+            return
+        frames = ["·  ", "·· ", "···"]
+        for frame in frames:
+            print(f"\r{self._muted('Starting')} {self._accent(frame)}", end="", file=self.stdout, flush=True)
+            time.sleep(0.06)
+        print("\r" + " " * 24 + "\r", end="", file=self.stdout, flush=True)
+
+    def _style(self, code: str, text: str) -> str:
+        if not self.use_color:
+            return text
+        return f"\033[{code}m{text}\033[0m"
+
+    def _accent(self, text: str) -> str:
+        return self._style("1;36", text)
+
+    def _label(self, text: str) -> str:
+        return self._style("1;34", f"{text}:")
+
+    def _muted(self, text: str) -> str:
+        return self._style("2", text)
+
+    def _user(self, text: str) -> str:
+        return self._style("1;33", f"{text}:")
+
+    def _tool(self, text: str) -> str:
+        return self._style("1;35", f"{text}:")
+
+    def _assistant(self, text: str) -> str:
+        return self._style("1;32", f"{text}:")
+
+    def _error(self, text: str) -> str:
+        return self._style("1;31", f"{text}:")
+
+
+def _is_tty(stream) -> bool:
+    isatty = getattr(stream, "isatty", None)
+    return bool(isatty and isatty())
+
+
+def _supports_color(stream) -> bool:
+    return _is_tty(stream) and os.environ.get("TERM") not in {None, "dumb"}
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -135,6 +211,7 @@ compdef _tiny_code_agent tiny-code-agent
 
 def main(argv: list[str] | None = None) -> int:
     load_dotenv(Path(".env"))
+    ui = TerminalUI(stdout=sys.stdout, stderr=sys.stderr)
 
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -165,20 +242,16 @@ def main(argv: list[str] | None = None) -> int:
         client=client,
         model=args.model,
         registry=registry,
-        printer=lambda message: print(message),
+        printer=ui.tool,
     )
 
-    print(f"Tiny Code Agent v0.1")
-    print(f"Provider: {args.provider}")
-    print(f"Model: {args.model}")
-    print(f"Workspace: {workspace}")
-    print("Type exit or quit to stop.")
+    ui.banner(provider=args.provider, model=args.model, workspace=workspace)
 
     while True:
         try:
-            user_input = input("You: ").strip()
+            user_input = input(ui.prompt()).strip()
         except (EOFError, KeyboardInterrupt):
-            print()
+            ui.line()
             return 0
 
         if user_input.lower() in {"exit", "quit"}:
@@ -189,7 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             answer = agent.ask(user_input)
         except LLMProviderError as exc:
-            print(f"Error: {exc.message}", file=sys.stderr)
+            ui.error(exc.message)
             continue
 
-        print(f"Assistant: {answer}")
+        ui.assistant(answer)

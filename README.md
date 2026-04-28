@@ -77,7 +77,9 @@ or, after installation:
 tiny-code-agent
 ```
 
-Type `exit` or `quit` to end the session.
+Type `exit` or `quit` to end the session. In an interactive terminal, the CLI
+uses simple colors to distinguish user, tool, assistant, and error output.
+Set `NO_COLOR=1` to disable ANSI colors.
 
 ## Example
 
