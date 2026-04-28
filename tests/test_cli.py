@@ -36,7 +36,7 @@ def test_list_models_prints_supported_models(monkeypatch) -> None:
 
     assert main(["--list-models"]) == 0
     assert "Supported providers and known models:" in stdout.getvalue()
-    assert "- openai: gpt-5.5 (default)" in stdout.getvalue()
+    assert "- openai: gpt-5-mini (default), gpt-5-nano" in stdout.getvalue()
 
 
 def test_list_providers_prints_supported_providers(monkeypatch) -> None:
@@ -55,7 +55,8 @@ def test_generate_completion_prints_bash_script(monkeypatch) -> None:
     assert main(["--generate-completion", "bash"]) == 0
     assert "_tiny_code_agent_completions()" in stdout.getvalue()
     assert "--list-providers" in stdout.getvalue()
-    assert "gpt-5.5" in stdout.getvalue()
+    assert "gpt-5-mini" in stdout.getvalue()
+    assert "gpt-5-nano" in stdout.getvalue()
 
 
 def test_generate_completion_prints_zsh_script(monkeypatch) -> None:
@@ -65,7 +66,7 @@ def test_generate_completion_prints_zsh_script(monkeypatch) -> None:
     assert main(["--generate-completion", "zsh"]) == 0
     assert "#compdef tiny-code-agent" in stdout.getvalue()
     assert "compdef _tiny_code_agent tiny-code-agent" in stdout.getvalue()
-    assert "gpt-5.5" in stdout.getvalue()
+    assert "gpt-5-mini" in stdout.getvalue()
 
 
 def test_list_models_renders_multiple_providers_and_defaults(monkeypatch) -> None:
@@ -79,21 +80,21 @@ def test_list_models_renders_multiple_providers_and_defaults(monkeypatch) -> Non
         "tiny_code_agent.cli.supported_models_for_provider",
         lambda provider: {
             "anthropic": ["claude-3-7-sonnet", "claude-3-5-haiku"],
-            "openai": ["gpt-5.5", "gpt-5.5-mini"],
+            "openai": ["gpt-5-mini", "gpt-5-nano"],
         }[provider],
     )
     monkeypatch.setattr(
         "tiny_code_agent.cli.default_model_for_provider",
         lambda provider: {
             "anthropic": "claude-3-7-sonnet",
-            "openai": "gpt-5.5",
+            "openai": "gpt-5-mini",
         }[provider],
     )
 
     assert main(["--list-models"]) == 0
     output = stdout.getvalue()
     assert "- anthropic: claude-3-7-sonnet (default), claude-3-5-haiku" in output
-    assert "- openai: gpt-5.5 (default), gpt-5.5-mini" in output
+    assert "- openai: gpt-5-mini (default), gpt-5-nano" in output
 
 
 def test_missing_api_key_exits_with_clear_error(monkeypatch) -> None:
@@ -144,7 +145,7 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     stderr = StringIO()
     ui = TerminalUI(stdout=stdout, stderr=stderr)
 
-    ui.banner(provider="openai", model="gpt-5.5", workspace=__import__("pathlib").Path("/tmp/demo"))
+    ui.banner(provider="openai", model="gpt-5-mini", workspace=__import__("pathlib").Path("/tmp/demo"))
     ui.tool('tool: read_file {"path": "README.md"}')
     ui.assistant("Done.")
     ui.error("quota exceeded")
@@ -173,7 +174,7 @@ def test_terminal_ui_uses_color_and_animation_on_tty(monkeypatch) -> None:
     monkeypatch.setattr("tiny_code_agent.cli.time.sleep", lambda seconds: sleeps.append(seconds))
 
     ui = TerminalUI(stdout=stdout, stderr=stderr)
-    ui.banner(provider="openai", model="gpt-5.5", workspace=Path("/tmp/demo"))
+    ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
     ui.tool('tool: read_file {"path": "README.md"}')
     ui.assistant("Done.")
     ui.error("quota exceeded")
@@ -195,7 +196,7 @@ def test_terminal_ui_disables_color_with_no_color(monkeypatch) -> None:
     monkeypatch.setenv("NO_COLOR", "1")
 
     ui = TerminalUI(stdout=stdout, stderr=stderr)
-    ui.banner(provider="openai", model="gpt-5.5", workspace=Path("/tmp/demo"))
+    ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
 
     assert "\033[" not in stdout.getvalue()
 

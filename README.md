@@ -42,8 +42,11 @@ Optional provider/model override:
 
 ```bash
 export TINY_CODE_AGENT_PROVIDER="openai"
-export TINY_CODE_AGENT_MODEL="gpt-5.5"
+export TINY_CODE_AGENT_MODEL="gpt-5-mini"
 ```
+
+For cheaper testing, the curated default is `gpt-5-mini`. The bundled model
+list also includes `gpt-5-nano` as an even cheaper option.
 
 To inspect the providers and models supported by this CLI:
 

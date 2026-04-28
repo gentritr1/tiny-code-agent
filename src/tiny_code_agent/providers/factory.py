@@ -5,7 +5,7 @@ from .openai import OpenAIClient
 
 DEFAULT_PROVIDER = "openai"
 PROVIDER_MODELS = {
-    "openai": ["gpt-5.5"],
+    "openai": ["gpt-5-mini", "gpt-5-nano"],
 }
 CLIENT_BUILDERS = {
     "openai": OpenAIClient,

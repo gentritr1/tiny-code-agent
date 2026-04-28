@@ -28,13 +28,13 @@ def _status_error(error_cls, status_code: int):
 
 
 def test_default_model_for_openai() -> None:
-    assert default_model_for_provider("openai") == "gpt-5.5"
+    assert default_model_for_provider("openai") == "gpt-5-mini"
 
 
 def test_supported_provider_helpers() -> None:
     assert supported_providers() == ["openai"]
-    assert supported_models_for_provider("openai") == ["gpt-5.5"]
-    assert all_supported_models() == ["gpt-5.5"]
+    assert supported_models_for_provider("openai") == ["gpt-5-mini", "gpt-5-nano"]
+    assert all_supported_models() == ["gpt-5-mini", "gpt-5-nano"]
 
 
 def test_supported_provider_helpers_scale_to_multiple_entries(monkeypatch) -> None:
@@ -42,19 +42,19 @@ def test_supported_provider_helpers_scale_to_multiple_entries(monkeypatch) -> No
         factory,
         "PROVIDER_MODELS",
         {
-            "openai": ["gpt-5.5", "gpt-5.5-mini"],
+            "openai": ["gpt-5-mini", "gpt-5-nano"],
             "anthropic": ["claude-3-7-sonnet", "claude-3-5-haiku"],
         },
     )
 
     assert supported_providers() == ["anthropic", "openai"]
-    assert supported_models_for_provider("openai") == ["gpt-5.5", "gpt-5.5-mini"]
+    assert supported_models_for_provider("openai") == ["gpt-5-mini", "gpt-5-nano"]
     assert default_model_for_provider("anthropic") == "claude-3-7-sonnet"
     assert all_supported_models() == [
         "claude-3-5-haiku",
         "claude-3-7-sonnet",
-        "gpt-5.5",
-        "gpt-5.5-mini",
+        "gpt-5-mini",
+        "gpt-5-nano",
     ]
 
 
@@ -235,7 +235,7 @@ def test_openai_complete_returns_normalized_turn() -> None:
     client = object.__new__(OpenAIClient)
     client._client = type("FakeOpenAI", (), {"responses": FakeResponses()})()
 
-    turn = client.complete(model="gpt-5.5", messages=[], tools=[], instructions="hi")
+    turn = client.complete(model="gpt-5-mini", messages=[], tools=[], instructions="hi")
 
     assert isinstance(turn, AssistantTurn)
     assert turn.text == "done"
@@ -252,7 +252,7 @@ def test_openai_complete_normalizes_provider_exception() -> None:
     client._client = type("FakeOpenAI", (), {"responses": FakeResponses()})()
 
     with pytest.raises(LLMProviderError, match="OpenAI request failed: boom"):
-        client.complete(model="gpt-5.5", messages=[], tools=[], instructions="hi")
+        client.complete(model="gpt-5-mini", messages=[], tools=[], instructions="hi")
 
 
 def test_normalize_openai_error_handles_import_failure(monkeypatch) -> None:
