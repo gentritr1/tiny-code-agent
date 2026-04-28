@@ -55,6 +55,44 @@ def test_generate_completion_prints_bash_script(monkeypatch) -> None:
     assert "gpt-5.5" in stdout.getvalue()
 
 
+def test_generate_completion_prints_zsh_script(monkeypatch) -> None:
+    stdout = StringIO()
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert main(["--generate-completion", "zsh"]) == 0
+    assert "#compdef tiny-code-agent" in stdout.getvalue()
+    assert "compdef _tiny_code_agent tiny-code-agent" in stdout.getvalue()
+    assert "gpt-5.5" in stdout.getvalue()
+
+
+def test_list_models_renders_multiple_providers_and_defaults(monkeypatch) -> None:
+    stdout = StringIO()
+    monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.supported_providers",
+        lambda: ["anthropic", "openai"],
+    )
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.supported_models_for_provider",
+        lambda provider: {
+            "anthropic": ["claude-3-7-sonnet", "claude-3-5-haiku"],
+            "openai": ["gpt-5.5", "gpt-5.5-mini"],
+        }[provider],
+    )
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.default_model_for_provider",
+        lambda provider: {
+            "anthropic": "claude-3-7-sonnet",
+            "openai": "gpt-5.5",
+        }[provider],
+    )
+
+    assert main(["--list-models"]) == 0
+    output = stdout.getvalue()
+    assert "- anthropic: claude-3-7-sonnet (default), claude-3-5-haiku" in output
+    assert "- openai: gpt-5.5 (default), gpt-5.5-mini" in output
+
+
 def test_missing_api_key_exits_with_clear_error(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
