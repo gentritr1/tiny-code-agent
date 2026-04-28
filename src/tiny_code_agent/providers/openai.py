@@ -22,6 +22,7 @@ class OpenAIClient:
         messages: list[Message],
         tools: list[Tool],
         instructions: str,
+        previous_response_id: str | None = None,
     ) -> AssistantTurn:
         try:
             response = self._client.responses.create(
@@ -29,11 +30,13 @@ class OpenAIClient:
                 input=messages,
                 tools=[tool.schema() for tool in tools],
                 instructions=instructions,
+                previous_response_id=previous_response_id,
             )
         except Exception as exc:
             raise _normalize_openai_error(exc) from exc
         output_items = _response_output_as_messages(response)
         return AssistantTurn(
+            response_id=str(getattr(response, "id", "")) or None,
             messages=output_items,
             text=_get_output_text(response),
             tool_calls=_get_tool_calls(response),
@@ -119,8 +122,14 @@ def _normalize_openai_error(exc: Exception) -> LLMProviderError:
         )
     if isinstance(exc, APIStatusError):
         status_code = getattr(exc, "status_code", "unknown")
+        body = getattr(exc, "body", None)
+        detail = ""
+        if isinstance(body, dict):
+            error = body.get("error")
+            if isinstance(error, dict) and error.get("message"):
+                detail = f" Details: {error['message']}"
         return LLMProviderError(
-            f"OpenAI returned an API error (status {status_code}). Try again later."
+            f"OpenAI returned an API error (status {status_code}). Try again later.{detail}"
         )
 
     return LLMProviderError(f"OpenAI request failed: {exc}")

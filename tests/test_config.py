@@ -3,6 +3,14 @@ from pathlib import Path
 from tiny_code_agent.config import load_dotenv
 
 
+def test_load_dotenv_ignores_missing_file(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    load_dotenv(tmp_path / ".env")
+
+    assert "OPENAI_API_KEY" not in __import__("os").environ
+
+
 def test_load_dotenv_sets_missing_values(tmp_path: Path, monkeypatch) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("OPENAI_API_KEY='test-key'\n# comment\nEMPTY=\n", encoding="utf-8")

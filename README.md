@@ -89,7 +89,11 @@ tiny-code-agent
 
 Type `exit` or `quit` to end the session. In an interactive terminal, the CLI
 uses simple colors to distinguish user, tool, assistant, and error output.
-Set `NO_COLOR=1` to disable ANSI colors.
+It also shows a lightweight thinking line with request-aware phrases while
+waiting on the model. Set `NO_COLOR=1` to disable ANSI colors.
+
+If you accidentally type input like `You: exit`, the CLI strips the leading
+`You:` prompt text automatically.
 
 ## Example
 

@@ -11,6 +11,7 @@ class FakeClient:
 
     def __init__(self) -> None:
         self.messages: list[list[dict[str, Any]]] = []
+        self.previous_response_ids: list[str | None] = []
 
     def complete(
         self,
@@ -19,10 +20,13 @@ class FakeClient:
         messages: list[dict[str, Any]],
         tools: list[Any],
         instructions: str,
+        previous_response_id: str | None = None,
     ) -> AssistantTurn:
         self.messages.append(list(messages))
+        self.previous_response_ids.append(previous_response_id)
         if len(self.messages) == 1:
             return AssistantTurn(
+                response_id="resp_1",
                 messages=[{"role": "assistant", "content": "Calling edit_file."}],
                 text="",
                 tool_calls=[
@@ -34,6 +38,7 @@ class FakeClient:
                 ],
             )
         return AssistantTurn(
+            response_id="resp_2",
             messages=[{"role": "assistant", "content": "Created hello.py."}],
             text="Created hello.py.",
             tool_calls=[],
@@ -58,6 +63,8 @@ def test_agent_executes_tool_and_returns_final_answer(tmp_path: Path) -> None:
     assert (tmp_path / "hello.py").read_text(encoding="utf-8") == "print('hi')\n"
     assert client.messages[-1][-1]["role"] == "tool"
     assert client.messages[-1][-1]["content"]["action"] == "created_file"
+    assert client.messages[0] == [{"role": "user", "content": "create hello.py"}]
+    assert client.previous_response_ids == [None, "resp_1"]
 
 
 class FailingClient:
@@ -70,6 +77,7 @@ class FailingClient:
         messages: list[dict[str, Any]],
         tools: list[Any],
         instructions: str,
+        previous_response_id: str | None = None,
     ) -> AssistantTurn:
         raise LLMProviderError("quota exceeded")
 
@@ -100,8 +108,10 @@ class LoopingClient:
         messages: list[dict[str, Any]],
         tools: list[Any],
         instructions: str,
+        previous_response_id: str | None = None,
     ) -> AssistantTurn:
         return AssistantTurn(
+            response_id="resp_loop",
             messages=[{"role": "assistant", "content": "Still working."}],
             text="",
             tool_calls=[ToolCall(id="loop", name="missing_tool", arguments={})],

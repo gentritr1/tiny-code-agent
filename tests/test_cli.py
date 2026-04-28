@@ -3,7 +3,7 @@ from pathlib import Path
 import runpy
 
 from tiny_code_agent.llm import LLMProviderError
-from tiny_code_agent.cli import TerminalUI, build_parser, main
+from tiny_code_agent.cli import TerminalUI, _normalize_user_input, _thinking_phrase, build_parser, main
 
 
 def test_parser_has_workspace_and_model_options() -> None:
@@ -145,6 +145,7 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     stderr = StringIO()
     ui = TerminalUI(stdout=stdout, stderr=stderr)
 
+    ui.start_thinking("read the readme")
     ui.banner(provider="openai", model="gpt-5-mini", workspace=__import__("pathlib").Path("/tmp/demo"))
     ui.tool('tool: read_file {"path": "README.md"}')
     ui.assistant("Done.")
@@ -172,8 +173,10 @@ def test_terminal_ui_uses_color_and_animation_on_tty(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr("tiny_code_agent.cli.time.sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr("tiny_code_agent.cli.random.choice", lambda options: options[0])
 
     ui = TerminalUI(stdout=stdout, stderr=stderr)
+    ui.start_thinking("create a file")
     ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
     ui.tool('tool: read_file {"path": "README.md"}')
     ui.assistant("Done.")
@@ -181,6 +184,7 @@ def test_terminal_ui_uses_color_and_animation_on_tty(monkeypatch) -> None:
 
     output = stdout.getvalue()
     assert "\033[" in output
+    assert "Sketching the edit..." in output
     assert "Starting" in output
     assert "Tiny Code Agent v0.1" in output
     assert 'Tool' in output
@@ -226,6 +230,7 @@ def test_cli_skips_empty_input_and_prints_assistant_reply(monkeypatch) -> None:
 
         def complete(self, **kwargs):
             return __import__("tiny_code_agent.llm").llm.AssistantTurn(
+                response_id="resp_fake",
                 messages=[{"role": "assistant", "content": "Hi"}],
                 text="Hi",
                 tool_calls=[],
@@ -241,9 +246,90 @@ def test_cli_skips_empty_input_and_prints_assistant_reply(monkeypatch) -> None:
     monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FakeClient())
     monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr("tiny_code_agent.cli.random.choice", lambda options: options[0])
 
     assert main([]) == 0
+    assert "Sketching" not in stdout.getvalue()
     assert "Assistant: Hi" in stdout.getvalue()
+
+
+def test_cli_shows_thinking_indicator_on_tty(monkeypatch) -> None:
+    class FakeClient:
+        provider_name = "fake"
+
+        def complete(self, **kwargs):
+            return __import__("tiny_code_agent.llm").llm.AssistantTurn(
+                response_id="resp_fake",
+                messages=[{"role": "assistant", "content": "Hi"}],
+                text="Hi",
+                tool_calls=[],
+            )
+
+        def tool_result_message(self, result):
+            raise AssertionError("tool_result_message should not be called")
+
+    stdout = FakeTTY()
+    stderr = FakeTTY()
+    inputs = iter(["hello", "exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FakeClient())
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr("sys.stderr", stderr)
+    monkeypatch.setattr("tiny_code_agent.cli.time.sleep", lambda seconds: None)
+    monkeypatch.setattr("tiny_code_agent.cli.random.choice", lambda options: options[0])
+
+    assert main([]) == 0
+    assert "Thinking..." in stdout.getvalue()
+    assert "Assistant" in stdout.getvalue()
+
+
+def test_cli_normalizes_accidental_prompt_prefix(monkeypatch) -> None:
+    class FakeClient:
+        provider_name = "fake"
+        seen_messages = []
+
+        def complete(self, **kwargs):
+            self.seen_messages.append(kwargs["messages"])
+            return __import__("tiny_code_agent.llm").llm.AssistantTurn(
+                response_id="resp_fake",
+                messages=[{"role": "assistant", "content": "Bye"}],
+                text="Bye",
+                tool_calls=[],
+            )
+
+        def tool_result_message(self, result):
+            raise AssertionError("tool_result_message should not be called")
+
+    stdout = StringIO()
+    inputs = iter(["You: hello", "exit"])
+    client = FakeClient()
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: client)
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert main([]) == 0
+    assert client.seen_messages[0] == [{"role": "user", "content": "hello"}]
+
+
+def test_normalize_user_input_strips_prompt_prefix() -> None:
+    assert _normalize_user_input("You: exit") == "exit"
+    assert _normalize_user_input("  you: hello  ") == "hello"
+    assert _normalize_user_input("plain text") == "plain text"
+
+
+def test_thinking_phrase_varies_by_request(monkeypatch) -> None:
+    monkeypatch.setattr("tiny_code_agent.cli.random.choice", lambda options: options[-1])
+
+    assert _thinking_phrase("create a file") == "Shaping the patch..."
+    assert _thinking_phrase("read the readme") == "Pulling the thread..."
+    assert _thinking_phrase("find the tests") == "Following the breadcrumbs..."
+    assert _thinking_phrase("hello there") == "Piecing it together..."
 
 
 def test_module_entrypoint_calls_main(monkeypatch) -> None:

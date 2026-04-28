@@ -18,6 +18,7 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class AssistantTurn:
+    response_id: str | None
     messages: list[Message]
     text: str
     tool_calls: list[ToolCall]
@@ -46,6 +47,7 @@ class LLMClient(Protocol):
         messages: list[Message],
         tools: list[Tool],
         instructions: str,
+        previous_response_id: str | None = None,
     ) -> AssistantTurn:
         ...
 

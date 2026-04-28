@@ -27,6 +27,12 @@ def _status_error(error_cls, status_code: int):
     return error_cls("boom", response=response, body=None)
 
 
+def _status_error_with_body(error_cls, status_code: int, body: dict):
+    request = Request("POST", "https://api.openai.com/v1/responses")
+    response = Response(status_code, request=request)
+    return error_cls("boom", response=response, body=body)
+
+
 def test_default_model_for_openai() -> None:
     assert default_model_for_provider("openai") == "gpt-5-mini"
 
@@ -120,6 +126,18 @@ def test_normalize_openai_error_handles_status_error() -> None:
     error = _normalize_openai_error(_status_error(APIStatusError, 500))
 
     assert error.message == "OpenAI returned an API error (status 500). Try again later."
+
+
+def test_normalize_openai_error_includes_status_error_body_message() -> None:
+    from openai import APIStatusError
+
+    error = _normalize_openai_error(
+        _status_error_with_body(APIStatusError, 400, {"error": {"message": "Bad tool result format"}})
+    )
+
+    assert error.message == (
+        "OpenAI returned an API error (status 400). Try again later. Details: Bad tool result format"
+    )
 
 
 def test_get_output_text_prefers_output_text_attribute() -> None:
@@ -223,10 +241,12 @@ def test_openai_complete_returns_normalized_turn() -> None:
 
     class FakeResponses:
         def create(self, **kwargs):
+            assert kwargs["previous_response_id"] is None
             return type(
                 "ResponseLike",
                 (),
                 {
+                    "id": "resp_1",
                     "output_text": None,
                     "output": [Dumpable(), MessageItem(), FunctionCallItem()],
                 },
@@ -238,6 +258,7 @@ def test_openai_complete_returns_normalized_turn() -> None:
     turn = client.complete(model="gpt-5-mini", messages=[], tools=[], instructions="hi")
 
     assert isinstance(turn, AssistantTurn)
+    assert turn.response_id == "resp_1"
     assert turn.text == "done"
     assert turn.tool_calls[0].name == "read_file"
     assert turn.messages[0] == {"type": "message", "content": "raw"}

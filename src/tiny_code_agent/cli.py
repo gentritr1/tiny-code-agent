@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import random
 import sys
 import time
 from pathlib import Path
@@ -26,6 +27,8 @@ class TerminalUI:
         self.stderr = stderr
         self.use_color = _supports_color(stdout) and not os.environ.get("NO_COLOR")
         self.use_animation = self.use_color and _is_tty(stdout)
+        self.thinking_active = False
+        self.separate_next_prompt = False
 
     def banner(self, *, provider: str, model: str, workspace: Path) -> None:
         self._animate_startup()
@@ -34,21 +37,43 @@ class TerminalUI:
         self.line(f"{self._label('Model')} {model}")
         self.line(f"{self._label('Workspace')} {workspace}")
         self.line(f"{self._muted('Type exit or quit to stop.')}")
+        self.separate_next_prompt = True
 
     def prompt(self) -> str:
         return f"{self._user('You')} "
 
     def tool(self, message: str) -> None:
+        self.stop_thinking()
         self.line(f"{self._tool('Tool')} {message.removeprefix('tool: ').strip()}")
+        self.separate_next_prompt = False
 
     def assistant(self, message: str) -> None:
+        self.stop_thinking()
         self.line(f"{self._assistant('Assistant')} {message}")
+        self.separate_next_prompt = True
 
     def error(self, message: str) -> None:
+        self.stop_thinking()
         self.line(f"{self._error('Error')} {message}", stream=self.stderr)
+        self.separate_next_prompt = True
+
+    def start_thinking(self, user_input: str) -> None:
+        if self.thinking_active or not _is_tty(self.stdout):
+            return
+        self.thinking_active = True
+        self.line(self._muted(_thinking_phrase(user_input)))
+
+    def stop_thinking(self) -> None:
+        self.thinking_active = False
+
+    def before_prompt(self) -> None:
+        self.stop_thinking()
+        if self.separate_next_prompt:
+            self.line()
+            self.separate_next_prompt = False
 
     def line(self, text: str = "", *, stream=None) -> None:
-        print(text, file=stream or self.stdout)
+        print(text, file=stream or self.stdout, flush=True)
 
     def _animate_startup(self) -> None:
         if not self.use_animation:
@@ -93,6 +118,42 @@ def _is_tty(stream) -> bool:
 
 def _supports_color(stream) -> bool:
     return _is_tty(stream) and os.environ.get("TERM") not in {None, "dumb"}
+
+
+def _normalize_user_input(text: str) -> str:
+    trimmed = text.strip()
+    if trimmed.lower().startswith("you:"):
+        return trimmed[4:].strip()
+    return trimmed
+
+
+def _thinking_phrase(user_input: str) -> str:
+    prompt = user_input.lower()
+    if any(word in prompt for word in ["create", "write", "edit", "update", "change"]):
+        options = [
+            "Sketching the edit...",
+            "Lining up the file change...",
+            "Shaping the patch...",
+        ]
+    elif any(word in prompt for word in ["read", "explain", "summarize", "describe"]):
+        options = [
+            "Reading through it...",
+            "Tracing the relevant bits...",
+            "Pulling the thread...",
+        ]
+    elif any(word in prompt for word in ["list", "find", "search", "show", "where"]):
+        options = [
+            "Scanning the workspace...",
+            "Looking around...",
+            "Following the breadcrumbs...",
+        ]
+    else:
+        options = [
+            "Thinking...",
+            "Plotting the next move...",
+            "Piecing it together...",
+        ]
+    return random.choice(options)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -249,17 +310,20 @@ def main(argv: list[str] | None = None) -> int:
 
     while True:
         try:
-            user_input = input(ui.prompt()).strip()
+            ui.before_prompt()
+            user_input = input(ui.prompt())
         except (EOFError, KeyboardInterrupt):
             ui.line()
             return 0
 
+        user_input = _normalize_user_input(user_input)
         if user_input.lower() in {"exit", "quit"}:
             return 0
         if not user_input:
             continue
 
         try:
+            ui.start_thinking(user_input)
             answer = agent.ask(user_input)
         except LLMProviderError as exc:
             ui.error(exc.message)

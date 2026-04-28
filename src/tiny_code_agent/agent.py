@@ -31,31 +31,37 @@ class CodingAgent:
 
     def ask(self, user_message: str) -> str:
         history_start = len(self.messages)
-        self.messages.append({"role": "user", "content": user_message})
+        current_input: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
+        previous_response_id: str | None = None
+        self.messages.extend(current_input)
 
         try:
             for _ in range(12):
                 turn = self.client.complete(
                     model=self.model,
-                    messages=self.messages,
+                    messages=current_input,
                     tools=list(self.registry.values()),
                     instructions=SYSTEM_PROMPT,
+                    previous_response_id=previous_response_id,
                 )
+                previous_response_id = turn.response_id
                 self.messages.extend(turn.messages)
 
                 if not turn.tool_calls:
                     return turn.text
 
+                next_input: list[dict[str, Any]] = []
                 for call in turn.tool_calls:
                     self.printer(
                         f"tool: {call.name} {json.dumps(call.arguments, ensure_ascii=False)}"
                     )
                     result = dispatch_tool(self.registry, call.name, call.arguments)
-                    self.messages.append(
-                        self.client.tool_result_message(
-                            ToolCallResult(call_id=call.id, name=call.name, output=result)
-                        )
+                    tool_message = self.client.tool_result_message(
+                        ToolCallResult(call_id=call.id, name=call.name, output=result)
                     )
+                    self.messages.append(tool_message)
+                    next_input.append(tool_message)
+                current_input = next_input
         except Exception:
             del self.messages[history_start:]
             raise
