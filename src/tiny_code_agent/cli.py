@@ -42,6 +42,9 @@ class TerminalUI:
     def prompt(self) -> str:
         return f"{self._user('You')} "
 
+    def write_prompt(self) -> None:
+        print(self.prompt(), end="", file=self.stdout, flush=True)
+
     def tool(self, message: str) -> None:
         self.stop_thinking()
         self.line(f"{self._tool('Tool')} {message.removeprefix('tool: ').strip()}")
@@ -311,7 +314,8 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         try:
             ui.before_prompt()
-            user_input = input(ui.prompt())
+            ui.write_prompt()
+            user_input = input()
         except (EOFError, KeyboardInterrupt):
             ui.line()
             return 0

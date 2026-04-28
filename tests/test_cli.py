@@ -99,6 +99,7 @@ def test_list_models_renders_multiple_providers_and_defaults(monkeypatch) -> Non
 
 def test_missing_api_key_exits_with_clear_error(monkeypatch) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr("tiny_code_agent.cli.load_dotenv", lambda path: None)
 
     try:
         main([])
@@ -110,7 +111,7 @@ def test_missing_api_key_exits_with_clear_error(monkeypatch) -> None:
 
 def test_cli_starts_and_exits_cleanly(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("builtins.input", lambda prompt: "exit")
+    monkeypatch.setattr("builtins.input", lambda: "exit")
 
     assert main([]) == 0
 
@@ -131,7 +132,7 @@ def test_cli_reports_provider_errors_without_traceback(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FailingClient())
-    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
     monkeypatch.setattr("sys.stderr", stderr)
 
@@ -158,6 +159,16 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     assert "Assistant: Done." in output
     assert "\033[" not in output
     assert "Error: quota exceeded" in stderr.getvalue()
+
+
+def test_terminal_ui_write_prompt_renders_once() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.write_prompt()
+
+    assert stdout.getvalue() == "You: "
 
 
 class FakeTTY(StringIO):
@@ -219,7 +230,7 @@ def test_cli_reports_invalid_provider_from_factory(monkeypatch) -> None:
 
 def test_cli_returns_cleanly_on_eof(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("builtins.input", lambda prompt: (_ for _ in ()).throw(EOFError()))
+    monkeypatch.setattr("builtins.input", lambda: (_ for _ in ()).throw(EOFError()))
 
     assert main([]) == 0
 
@@ -244,7 +255,7 @@ def test_cli_skips_empty_input_and_prints_assistant_reply(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FakeClient())
-    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
     monkeypatch.setattr("tiny_code_agent.cli.random.choice", lambda options: options[0])
 
@@ -276,7 +287,7 @@ def test_cli_shows_thinking_indicator_on_tty(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FakeClient())
-    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
     monkeypatch.setattr("sys.stderr", stderr)
     monkeypatch.setattr("tiny_code_agent.cli.time.sleep", lambda seconds: None)
@@ -310,7 +321,7 @@ def test_cli_normalizes_accidental_prompt_prefix(monkeypatch) -> None:
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: client)
-    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
 
     assert main([]) == 0
