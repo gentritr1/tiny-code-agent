@@ -325,7 +325,7 @@ def _handle_command(command: str, *, ui: TerminalUI, provider: str, model: str, 
     if normalized in {"/exit", "/quit"}:
         raise SystemExit(0)
     if normalized == "/help":
-        ui.line("Commands: /help, /models, /workspace, /exit")
+        ui.line("Commands: /help, /models, /workspace, /exit, /quit")
         return True
     if normalized == "/models":
         for provider_name in supported_providers():

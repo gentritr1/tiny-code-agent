@@ -254,7 +254,7 @@ def test_terminal_ui_disables_color_with_no_color(monkeypatch) -> None:
     assert "\033[" not in stdout.getvalue()
 
 
-def test_terminal_ui_plain_flag_disables_tty_color_and_thinking(monkeypatch) -> None:
+def test_terminal_ui_plain_flag_disables_tty_color_and_thinking(monkeypatch, tmp_path) -> None:
     stdout = FakeTTY()
     stderr = FakeTTY()
 
@@ -263,7 +263,7 @@ def test_terminal_ui_plain_flag_disables_tty_color_and_thinking(monkeypatch) -> 
 
     ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
     ui.start_thinking("create a file")
-    ui.banner(provider="openai", model="gpt-5-mini", workspace=Path("/tmp/demo"))
+    ui.banner(provider="openai", model="gpt-5-mini", workspace=tmp_path)
 
     assert "\033[" not in stdout.getvalue()
     assert "Sketching" not in stdout.getvalue()
@@ -356,12 +356,21 @@ def test_cli_supports_session_commands(monkeypatch) -> None:
     inputs = iter(["/help", "/models", "/workspace", "/exit"])
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("tiny_code_agent.cli.supported_providers", lambda: ["openai"])
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.supported_models_for_provider",
+        lambda provider: ["gpt-5-mini", "gpt-5-nano"] if provider == "openai" else [],
+    )
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.default_model_for_provider",
+        lambda provider: "gpt-5-mini" if provider == "openai" else "gpt-5-mini",
+    )
     monkeypatch.setattr("builtins.input", lambda: next(inputs))
     monkeypatch.setattr("sys.stdout", stdout)
 
     assert main([]) == 0
     output = stdout.getvalue()
-    assert "Commands: /help, /models, /workspace, /exit" in output
+    assert "Commands: /help, /models, /workspace, /exit, /quit" in output
     assert "openai: gpt-5-mini (default), gpt-5-nano" in output
     assert "Workspace:" in output
 
