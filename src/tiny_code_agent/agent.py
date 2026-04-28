@@ -30,29 +30,34 @@ class CodingAgent:
         self.printer = printer or (lambda message: None)
 
     def ask(self, user_message: str) -> str:
+        history_start = len(self.messages)
         self.messages.append({"role": "user", "content": user_message})
 
-        for _ in range(12):
-            turn = self.client.complete(
-                model=self.model,
-                messages=self.messages,
-                tools=list(self.registry.values()),
-                instructions=SYSTEM_PROMPT,
-            )
-            self.messages.extend(turn.messages)
-
-            if not turn.tool_calls:
-                return turn.text
-
-            for call in turn.tool_calls:
-                self.printer(
-                    f"tool: {call.name} {json.dumps(call.arguments, ensure_ascii=False)}"
+        try:
+            for _ in range(12):
+                turn = self.client.complete(
+                    model=self.model,
+                    messages=self.messages,
+                    tools=list(self.registry.values()),
+                    instructions=SYSTEM_PROMPT,
                 )
-                result = dispatch_tool(self.registry, call.name, call.arguments)
-                self.messages.append(
-                    self.client.tool_result_message(
-                        ToolCallResult(call_id=call.id, name=call.name, output=result)
+                self.messages.extend(turn.messages)
+
+                if not turn.tool_calls:
+                    return turn.text
+
+                for call in turn.tool_calls:
+                    self.printer(
+                        f"tool: {call.name} {json.dumps(call.arguments, ensure_ascii=False)}"
                     )
-                )
+                    result = dispatch_tool(self.registry, call.name, call.arguments)
+                    self.messages.append(
+                        self.client.tool_result_message(
+                            ToolCallResult(call_id=call.id, name=call.name, output=result)
+                        )
+                    )
+        except Exception:
+            del self.messages[history_start:]
+            raise
 
         return "Stopped because the tool loop exceeded the safety limit."

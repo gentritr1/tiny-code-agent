@@ -91,6 +91,38 @@ The exact tool trace depends on the model, but the loop is always the same:
 the model asks for tools, the CLI runs them, and the model receives structured
 results.
 
+## Manual Smoke Test
+
+The live agent run requires a real `OPENAI_API_KEY`. Without that, only the
+unit tests and the listing/completion commands will work.
+
+From the repo root:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+export OPENAI_API_KEY="sk-your-api-key"
+python -m tiny_code_agent --list-models
+python -m tiny_code_agent
+```
+
+At the `You:` prompt, try:
+
+```text
+Create hello.py with a hello function.
+```
+
+Expected behavior:
+
+- the CLI prints startup information with provider, model, and workspace
+- the agent prints a `tool:` line before local file actions
+- `hello.py` is created in the current workspace
+- the assistant returns a final summary after the tool call finishes
+
+If your API key is missing, invalid, or out of quota, the CLI should print a
+clear error message instead of a Python traceback.
+
 ## Safety Limitations
 
 - File tools are restricted to the workspace root where the CLI starts.

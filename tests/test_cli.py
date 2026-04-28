@@ -1,5 +1,6 @@
 from io import StringIO
 
+from tiny_code_agent.llm import LLMProviderError
 from tiny_code_agent.cli import build_parser, main
 
 
@@ -109,3 +110,28 @@ def test_cli_starts_and_exits_cleanly(monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda prompt: "exit")
 
     assert main([]) == 0
+
+
+def test_cli_reports_provider_errors_without_traceback(monkeypatch) -> None:
+    class FailingClient:
+        provider_name = "fake"
+
+        def complete(self, **kwargs):
+            raise LLMProviderError("quota exceeded")
+
+        def tool_result_message(self, result):
+            raise AssertionError("tool_result_message should not be called")
+
+    stdout = StringIO()
+    stderr = StringIO()
+    inputs = iter(["create hello.py", "exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: FailingClient())
+    monkeypatch.setattr("builtins.input", lambda prompt: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+    monkeypatch.setattr("sys.stderr", stderr)
+
+    assert main([]) == 0
+    assert "Traceback" not in stderr.getvalue()
+    assert "Error: quota exceeded" in stderr.getvalue()

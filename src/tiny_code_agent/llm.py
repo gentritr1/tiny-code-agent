@@ -30,6 +30,12 @@ class ToolCallResult:
     output: dict[str, Any]
 
 
+class LLMProviderError(RuntimeError):
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
 class LLMClient(Protocol):
     provider_name: str
 

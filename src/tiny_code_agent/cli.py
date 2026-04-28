@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from .agent import CodingAgent
 from .config import load_dotenv
+from .llm import LLMProviderError
 from .providers import (
     all_supported_models,
     build_llm_client,
@@ -184,5 +186,10 @@ def main(argv: list[str] | None = None) -> int:
         if not user_input:
             continue
 
-        answer = agent.ask(user_input)
+        try:
+            answer = agent.ask(user_input)
+        except LLMProviderError as exc:
+            print(f"Error: {exc.message}", file=sys.stderr)
+            continue
+
         print(f"Assistant: {answer}")

@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from tiny_code_agent.agent import CodingAgent
-from tiny_code_agent.llm import AssistantTurn, ToolCall, ToolCallResult
+from tiny_code_agent.llm import AssistantTurn, LLMProviderError, ToolCall, ToolCallResult
 from tiny_code_agent.tools import build_tool_registry
 
 
@@ -58,3 +58,33 @@ def test_agent_executes_tool_and_returns_final_answer(tmp_path: Path) -> None:
     assert (tmp_path / "hello.py").read_text(encoding="utf-8") == "print('hi')\n"
     assert client.messages[-1][-1]["role"] == "tool"
     assert client.messages[-1][-1]["content"]["action"] == "created_file"
+
+
+class FailingClient:
+    provider_name = "fake"
+
+    def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[Any],
+        instructions: str,
+    ) -> AssistantTurn:
+        raise LLMProviderError("quota exceeded")
+
+    def tool_result_message(self, result: ToolCallResult) -> dict[str, Any]:
+        raise AssertionError("tool_result_message should not be called")
+
+
+def test_agent_rolls_back_failed_turn_from_history(tmp_path: Path) -> None:
+    agent = CodingAgent(client=FailingClient(), model="test-model", registry=build_tool_registry(tmp_path))
+
+    try:
+        agent.ask("create hello.py")
+    except LLMProviderError as exc:
+        assert exc.message == "quota exceeded"
+    else:
+        raise AssertionError("expected LLMProviderError")
+
+    assert agent.messages == []

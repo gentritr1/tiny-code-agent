@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..llm import AssistantTurn, Message, ToolCall, ToolCallResult
+from ..llm import AssistantTurn, LLMProviderError, Message, ToolCall, ToolCallResult
 from ..tools import Tool
 
 
@@ -23,12 +23,15 @@ class OpenAIClient:
         tools: list[Tool],
         instructions: str,
     ) -> AssistantTurn:
-        response = self._client.responses.create(
-            model=model,
-            input=messages,
-            tools=[tool.schema() for tool in tools],
-            instructions=instructions,
-        )
+        try:
+            response = self._client.responses.create(
+                model=model,
+                input=messages,
+                tools=[tool.schema() for tool in tools],
+                instructions=instructions,
+            )
+        except Exception as exc:
+            raise _normalize_openai_error(exc) from exc
         output_items = _response_output_as_messages(response)
         return AssistantTurn(
             messages=output_items,
@@ -89,3 +92,35 @@ def _response_output_as_messages(response: Any) -> list[dict[str, Any]]:
         elif isinstance(item, dict):
             items.append(item)
     return items
+
+
+def _normalize_openai_error(exc: Exception) -> LLMProviderError:
+    try:
+        from openai import APIConnectionError, APIStatusError, APITimeoutError, AuthenticationError, RateLimitError
+    except ImportError:
+        return LLMProviderError(f"OpenAI request failed: {exc}")
+
+    if isinstance(exc, AuthenticationError):
+        return LLMProviderError(
+            "OpenAI authentication failed. Check OPENAI_API_KEY and try again."
+        )
+    if isinstance(exc, RateLimitError):
+        return LLMProviderError(
+            "OpenAI rejected the request because your quota or rate limit was exceeded. "
+            "Check billing, usage limits, or try again later."
+        )
+    if isinstance(exc, APITimeoutError):
+        return LLMProviderError(
+            "OpenAI timed out while generating a response. Try again."
+        )
+    if isinstance(exc, APIConnectionError):
+        return LLMProviderError(
+            "Could not reach OpenAI. Check your network connection and try again."
+        )
+    if isinstance(exc, APIStatusError):
+        status_code = getattr(exc, "status_code", "unknown")
+        return LLMProviderError(
+            f"OpenAI returned an API error (status {status_code}). Try again later."
+        )
+
+    return LLMProviderError(f"OpenAI request failed: {exc}")
