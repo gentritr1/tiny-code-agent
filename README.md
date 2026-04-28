@@ -16,6 +16,13 @@ The `v0.1` version supports three safe workspace-limited file tools:
 - `read_file`
 - `edit_file`
 
+It also includes:
+
+- provider and model discovery with `--list-providers` and `--list-models`
+- generated bash and zsh completion scripts
+- clearer provider/API error messages instead of raw Python tracebacks
+- lightweight terminal UX for interactive sessions, including colors and a small startup animation
+
 ## Setup
 
 ```bash
@@ -125,6 +132,20 @@ Expected behavior:
 If your API key is missing, invalid, or out of quota, the CLI should print a
 clear error message instead of a Python traceback.
 
+## Error Handling
+
+The CLI now catches common provider/API failures and keeps the session alive.
+Examples include:
+
+- missing or invalid API key
+- insufficient quota or rate limiting
+- API timeout
+- network connection failures
+- generic provider API errors
+
+Failed provider turns are rolled back from agent history so a broken request
+does not pollute later turns.
+
 ## Safety Limitations
 
 - File tools are restricted to the workspace root where the CLI starts.
@@ -138,6 +159,14 @@ clear error message instead of a Python traceback.
 ```bash
 pytest
 ```
+
+Coverage:
+
+```bash
+pytest --cov=src/tiny_code_agent --cov-report=term-missing
+```
+
+The current suite covers the source tree at 100% line coverage.
 
 ## Roadmap
 

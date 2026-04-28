@@ -24,11 +24,28 @@ tool_result_message should translate a local tool result back into the message s
 2. Implement an adapter class that satisfies LLMClient.
 3. Register it in src/tiny_code_agent/providers/factory.py.
 4. Add provider-specific environment variable checks in src/tiny_code_agent/cli.py.
-5. Add tests for model defaults, unsupported providers, and adapter message conversion.
+5. Add the provider's curated model list to `PROVIDER_MODELS` so `--list-models` and shell completion stay accurate.
+6. Add or update the client builder in `CLIENT_BUILDERS`.
+7. Add tests for model defaults, unsupported providers, adapter message conversion, and error normalization.
 
 ## Current Provider
 
 - openai: implemented with the Responses API
+
+## Current CLI Expectations
+
+The CLI now exposes provider metadata directly:
+
+- `--list-providers`
+- `--list-models`
+- `--generate-completion bash`
+- `--generate-completion zsh`
+
+Any new provider should integrate cleanly with those commands by updating the
+provider registry in `src/tiny_code_agent/providers/factory.py`.
+
+Provider adapters should also raise clear user-facing errors through
+`LLMProviderError` rather than leaking raw SDK exceptions to the REPL.
 
 ## Future Provider Notes
 
