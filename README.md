@@ -38,6 +38,29 @@ export TINY_CODE_AGENT_PROVIDER="openai"
 export TINY_CODE_AGENT_MODEL="gpt-5.5"
 ```
 
+To inspect the providers and models supported by this CLI:
+
+```bash
+tiny-code-agent --list-providers
+tiny-code-agent --list-models
+```
+
+To generate shell completions:
+
+```bash
+tiny-code-agent --generate-completion bash
+tiny-code-agent --generate-completion zsh
+```
+
+Example for the current shell session:
+
+```bash
+eval "$(tiny-code-agent --generate-completion bash)"
+```
+
+When you add more models later, update the provider registry in
+`src/tiny_code_agent/providers/factory.py` and these commands will pick them up.
+
 The core agent is provider-agnostic. OpenAI is the first implemented provider,
 and the provider adapter layer is designed so Anthropic, DeepSeek, or another
 tool-calling LLM can be added without changing the local file tools.

@@ -1,10 +1,22 @@
 import pytest
 
-from tiny_code_agent.providers import build_llm_client, default_model_for_provider
+from tiny_code_agent.providers import (
+    all_supported_models,
+    build_llm_client,
+    default_model_for_provider,
+    supported_models_for_provider,
+    supported_providers,
+)
 
 
 def test_default_model_for_openai() -> None:
     assert default_model_for_provider("openai") == "gpt-5.5"
+
+
+def test_supported_provider_helpers() -> None:
+    assert supported_providers() == ["openai"]
+    assert supported_models_for_provider("openai") == ["gpt-5.5"]
+    assert all_supported_models() == ["gpt-5.5"]
 
 
 def test_unknown_provider_has_clear_error() -> None:
