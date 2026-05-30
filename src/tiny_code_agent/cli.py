@@ -48,6 +48,34 @@ class TerminalUI:
     def write_prompt(self) -> None:
         print(self.prompt(), end="", file=self.stdout, flush=True)
 
+    def confirm_edit(self, path: Path, action: str) -> bool:
+        self.stop_thinking()
+        while True:
+            print(
+                f"Apply {action} to {path}? Type y to apply or n to reject: ",
+                end="",
+                file=self.stdout,
+                flush=True,
+            )
+            try:
+                answer = input().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                self.line()
+                self.line("Edit rejected.")
+                return False
+            self.line()
+            if answer in {"y", "yes"}:
+                return True
+            if answer in {"n", "no"}:
+                return False
+            self.line("Please type y or n.")
+
+    def event(self, message: str) -> None:
+        if message == "status: llm_wait":
+            self.start_thinking("waiting for model")
+            return
+        self.tool(message)
+
     def tool(self, message: str) -> None:
         self.stop_thinking()
         if message.startswith("tool_result:"):
@@ -56,7 +84,7 @@ class TerminalUI:
         name, arguments = _parse_tool_trace(message)
         self.line(f"{self._tool('Tool')} {name}")
         for key, value in arguments.items():
-            if key == "new_str" and isinstance(value, str):
+            if key in {"anchor", "old_str", "new_str", "text"} and isinstance(value, str):
                 value = _summarize_text(value)
             self.line(f"  {key}: {value}")
         self.separate_next_prompt = False
@@ -68,6 +96,23 @@ class TerminalUI:
         path = result.get("path")
         if path:
             self.line(f"  path: {path}")
+        for key in ["files", "entries", "matches"]:
+            value = result.get(key)
+            if isinstance(value, list):
+                self.line(f"  {key}: {len(value)}")
+        content = result.get("content")
+        if isinstance(content, str):
+            self.line(f"  content: {len(content)} chars")
+        if result.get("truncated"):
+            self.line("  truncated: true")
+        result_message = result.get("message")
+        if result_message:
+            self.line(f"  message: {result_message}")
+        diff = result.get("diff")
+        if diff:
+            self.line("  diff:")
+            for line in str(diff).splitlines():
+                self.line(f"    {line}")
         self.separate_next_prompt = False
 
     def assistant(self, message: str) -> None:
@@ -81,7 +126,14 @@ class TerminalUI:
         self.separate_next_prompt = True
 
     def start_thinking(self, user_input: str) -> None:
-        if self.thinking_active or self.plain or not _is_tty(self.stdout):
+        if self.thinking_active:
+            return
+        if self.plain:
+            self.thinking_active = True
+            self.line()
+            self.line(f"{self._assistant('Assistant')} Working...")
+            return
+        if not _is_tty(self.stdout):
             return
         self.thinking_active = True
         self.line(self._muted(_thinking_phrase(user_input)))
@@ -103,7 +155,12 @@ class TerminalUI:
             return
         frames = ["·  ", "·· ", "···"]
         for frame in frames:
-            print(f"\r{self._muted('Starting')} {self._accent(frame)}", end="", file=self.stdout, flush=True)
+            print(
+                f"\r{self._muted('Starting')} {self._accent(frame)}",
+                end="",
+                file=self.stdout,
+                flush=True,
+            )
             time.sleep(0.06)
         print("\r" + " " * 24 + "\r", end="", file=self.stdout, flush=True)
 
@@ -222,6 +279,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable colors, animation, and thinking phrases for plain terminal output.",
     )
+    parser.add_argument(
+        "--confirm-edits",
+        action="store_true",
+        help="Ask before applying write tools during interactive sessions.",
+    )
     return parser
 
 
@@ -249,6 +311,18 @@ def _print_supported_models() -> None:
 def _completion_script(shell: str) -> str:
     providers = " ".join(supported_providers())
     models = " ".join(all_supported_models())
+    options = " ".join(
+        [
+            "--workspace",
+            "--provider",
+            "--model",
+            "--list-models",
+            "--list-providers",
+            "--generate-completion",
+            "--plain",
+            "--confirm-edits",
+        ]
+    )
 
     if shell == "bash":
         return f"""_tiny_code_agent_completions()
@@ -272,7 +346,7 @@ def _completion_script(shell: str) -> str:
             ;;
     esac
 
-    COMPREPLY=( $(compgen -W "--workspace --provider --model --list-models --list-providers --generate-completion --plain" -- "$cur") )
+    COMPREPLY=( $(compgen -W "{options}" -- "$cur") )
 }}
 
 complete -F _tiny_code_agent_completions tiny-code-agent
@@ -292,7 +366,8 @@ _tiny_code_agent() {{
     '--list-models[Print the providers and known models supported by this CLI]' \\
     '--list-providers[Print the supported providers]' \\
     '--generate-completion[Print a shell completion script]:shell:(bash zsh)' \\
-    '--plain[Disable colors, animation, and thinking phrases]'
+    '--plain[Disable colors, animation, and thinking phrases]' \\
+    '--confirm-edits[Ask before applying write tools during interactive sessions]'
 }}
 
 compdef _tiny_code_agent tiny-code-agent
@@ -320,7 +395,14 @@ def _summarize_text(text: str, limit: int = 80) -> str:
     return f"{normalized[: limit - 3]}..."
 
 
-def _handle_command(command: str, *, ui: TerminalUI, provider: str, model: str, workspace: Path) -> bool:
+def _handle_command(
+    command: str,
+    *,
+    ui: TerminalUI,
+    provider: str,
+    model: str,
+    workspace: Path,
+) -> bool:
     normalized = command.strip().lower()
     if normalized in {"/exit", "/quit"}:
         raise SystemExit(0)
@@ -363,7 +445,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("OPENAI_API_KEY is required for provider=openai.")
 
     workspace = Path(args.workspace).expanduser().resolve()
-    registry = build_tool_registry(workspace)
+    registry = build_tool_registry(
+        workspace,
+        confirm_edit=ui.confirm_edit if args.confirm_edits else None,
+    )
     try:
         client = build_llm_client(args.provider)
     except ValueError as exc:
@@ -373,7 +458,7 @@ def main(argv: list[str] | None = None) -> int:
         client=client,
         model=args.model,
         registry=registry,
-        printer=ui.tool,
+        printer=ui.event,
     )
 
     ui.banner(provider=args.provider, model=args.model, workspace=workspace)
@@ -403,10 +488,11 @@ def main(argv: list[str] | None = None) -> int:
             except SystemExit as exc:
                 return int(exc.code)
         if not user_input:
+            if not _is_tty(ui.stdout):
+                ui.line()
             continue
 
         try:
-            ui.start_thinking(user_input)
             answer = agent.ask(user_input)
         except LLMProviderError as exc:
             ui.error(exc.message)

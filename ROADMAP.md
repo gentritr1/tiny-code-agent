@@ -13,8 +13,8 @@
 
 ## Medium
 
-9. Safer editing tools: append, insert before/after, dry-run diffs, and optional confirmations.
-10. Search and inspection tools: text search, file metadata, and bounded tree views.
+9. Done: safer editing tools with preview diffs, optional confirmations, append, insert-after, and insert-before.
+10. Done: search and inspection tools with exact text search and bounded tree views.
 11. Guarded command execution for tests and read-only developer commands.
 12. Planning mode for larger tasks before file mutation.
 

@@ -32,11 +32,14 @@ def test_parser_accepts_list_models_flag() -> None:
 
 def test_parser_accepts_provider_listing_and_completion_flags() -> None:
     parser = build_parser()
-    args = parser.parse_args(["--list-providers", "--generate-completion", "bash", "--plain"])
+    args = parser.parse_args(
+        ["--list-providers", "--generate-completion", "bash", "--plain", "--confirm-edits"]
+    )
 
     assert args.list_providers is True
     assert args.generate_completion == "bash"
     assert args.plain is True
+    assert args.confirm_edits is True
 
 
 def test_list_models_prints_supported_models(monkeypatch) -> None:
@@ -65,6 +68,7 @@ def test_generate_completion_prints_bash_script(monkeypatch) -> None:
     assert "_tiny_code_agent_completions()" in stdout.getvalue()
     assert "--list-providers" in stdout.getvalue()
     assert "--plain" in stdout.getvalue()
+    assert "--confirm-edits" in stdout.getvalue()
     assert "gpt-5-mini" in stdout.getvalue()
     assert "gpt-5-nano" in stdout.getvalue()
 
@@ -126,6 +130,19 @@ def test_cli_starts_and_exits_cleanly(monkeypatch) -> None:
     assert main([]) == 0
 
 
+def test_cli_keeps_empty_prompts_on_separate_lines(monkeypatch) -> None:
+    stdout = StringIO()
+    inputs = iter(["", "", "exit"])
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setattr("builtins.input", lambda: next(inputs))
+    monkeypatch.setattr("sys.stdout", stdout)
+
+    assert main(["--plain"]) == 0
+    assert "You: You: You:" not in stdout.getvalue()
+    assert stdout.getvalue().endswith("You: \nYou: \nYou: ")
+
+
 def test_cli_reports_provider_errors_without_traceback(monkeypatch) -> None:
     class FailingClient:
         provider_name = "fake"
@@ -151,13 +168,64 @@ def test_cli_reports_provider_errors_without_traceback(monkeypatch) -> None:
     assert "Error: quota exceeded" in stderr.getvalue()
 
 
+def test_confirm_edit_accepts_yes(monkeypatch) -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+    answers = iter(["y"])
+
+    monkeypatch.setattr("builtins.input", lambda: next(answers))
+
+    assert ui.confirm_edit(Path("/tmp/demo.py"), "edited") is True
+    assert "Apply edited to /tmp/demo.py? Type y to apply or n to reject:" in stdout.getvalue()
+    assert stdout.getvalue().endswith("\n")
+
+
+def test_confirm_edit_requires_explicit_answer(monkeypatch) -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+    answers = iter(["", "n"])
+
+    monkeypatch.setattr("builtins.input", lambda: next(answers))
+
+    assert ui.confirm_edit(Path("/tmp/demo.py"), "edited") is False
+    assert "Please type y or n." in stdout.getvalue()
+    assert stdout.getvalue().endswith("\n")
+
+
+def test_confirm_edit_treats_interrupt_as_rejection(monkeypatch) -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+
+    monkeypatch.setattr("builtins.input", lambda: (_ for _ in ()).throw(KeyboardInterrupt()))
+
+    assert ui.confirm_edit(Path("/tmp/demo.py"), "edited") is False
+    assert "rejected" in stdout.getvalue()
+
+
+def test_terminal_ui_routes_status_events_to_loading_state() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+
+    ui.event("status: llm_wait")
+
+    assert stdout.getvalue() == "\nAssistant: Working...\n"
+
+
 def test_terminal_ui_plain_rendering_without_tty() -> None:
     stdout = StringIO()
     stderr = StringIO()
     ui = TerminalUI(stdout=stdout, stderr=stderr)
 
     ui.start_thinking("read the readme")
-    ui.banner(provider="openai", model="gpt-5-mini", workspace=__import__("pathlib").Path("/tmp/demo"))
+    ui.banner(
+        provider="openai",
+        model="gpt-5-mini",
+        workspace=__import__("pathlib").Path("/tmp/demo"),
+    )
     ui.tool('tool: read_file {"path": "README.md"}')
     ui.assistant("Done.")
     ui.error("quota exceeded")
@@ -170,6 +238,17 @@ def test_terminal_ui_plain_rendering_without_tty() -> None:
     assert "Assistant: Done." in output
     assert "\033[" not in output
     assert "Error: quota exceeded" in stderr.getvalue()
+
+
+def test_terminal_ui_plain_mode_shows_loading_state() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr, plain=True)
+
+    ui.write_prompt()
+    ui.start_thinking("read the readme")
+
+    assert stdout.getvalue() == "You: \nAssistant: Working...\n"
 
 
 def test_terminal_ui_summarizes_multiline_tool_text() -> None:
@@ -197,6 +276,55 @@ def test_terminal_ui_renders_tool_result_status() -> None:
     assert "result: ok" in output
     assert "path: /tmp/a.txt" in output
     assert "result: error: file_not_found" in output
+
+
+def test_terminal_ui_summarizes_structured_tool_results() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.tool(
+        'tool_result: search_files '
+        '{"ok": true, "matches": [{"path": "a.py"}], "truncated": true}'
+    )
+    ui.tool('tool_result: list_tree {"ok": true, "entries": [{"path": "a.py"}]}')
+    ui.tool('tool_result: read_file {"ok": true, "content": "hello"}')
+
+    output = stdout.getvalue()
+    assert "matches: 1" in output
+    assert "truncated: true" in output
+    assert "entries: 1" in output
+    assert "content: 5 chars" in output
+
+
+def test_terminal_ui_renders_tool_result_message() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.tool(
+        'tool_result: append_file '
+        '{"ok": false, "error": "edit_rejected", "message": "User rejected the edit."}'
+    )
+
+    assert "message: User rejected the edit." in stdout.getvalue()
+
+
+def test_terminal_ui_renders_preview_diff() -> None:
+    stdout = StringIO()
+    stderr = StringIO()
+    ui = TerminalUI(stdout=stdout, stderr=stderr)
+
+    ui.tool(
+        'tool_result: preview_edit_file '
+        '{"ok": true, "path": "/tmp/a.py", "diff": "--- a\\n+++ b\\n-x\\n+y\\n"}'
+    )
+
+    output = stdout.getvalue()
+    assert "result: ok" in output
+    assert "diff:" in output
+    assert "--- a" in output
+    assert "+y" in output
 
 
 def test_terminal_ui_write_prompt_renders_once() -> None:
@@ -271,7 +399,10 @@ def test_terminal_ui_plain_flag_disables_tty_color_and_thinking(monkeypatch, tmp
 
 def test_cli_reports_invalid_provider_from_factory(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setattr("tiny_code_agent.cli.build_llm_client", lambda provider: (_ for _ in ()).throw(ValueError("unsupported provider 'bad'")))
+    monkeypatch.setattr(
+        "tiny_code_agent.cli.build_llm_client",
+        lambda provider: (_ for _ in ()).throw(ValueError("unsupported provider 'bad'")),
+    )
 
     try:
         main(["--provider", "openai"])
