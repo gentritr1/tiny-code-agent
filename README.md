@@ -10,11 +10,20 @@ agent loop without hiding the moving parts:
 4. send the tool result back
 5. repeat until the model gives a final answer
 
-The `v0.1` version supports three safe workspace-limited file tools:
+The `v0.1` version supports these safe workspace-limited tools:
 
 - `list_files`
+- `list_tree`
+- `search_files`
 - `read_file`
+- `preview_edit_file`
+- `preview_append_file`
+- `preview_insert_after`
+- `preview_insert_before`
 - `edit_file`
+- `append_file`
+- `insert_after`
+- `insert_before`
 
 It also includes:
 
@@ -22,6 +31,9 @@ It also includes:
 - generated bash and zsh completion scripts
 - clearer provider/API error messages instead of raw Python tracebacks
 - lightweight terminal UX for interactive sessions, including colors and a small startup animation
+- visible loading states while the agent waits on the model
+- preview diffs before writes, so beginners can inspect the exact file change
+- optional edit confirmations with `--confirm-edits`
 
 ## Setup
 
@@ -71,6 +83,12 @@ eval "$(tiny-code-agent --generate-completion bash)"
 When you add more models later, update the provider registry in
 `src/tiny_code_agent/providers/factory.py` and these commands will pick them up.
 
+To pause before writes during a learning session:
+
+```bash
+tiny-code-agent --confirm-edits
+```
+
 The core agent is provider-agnostic. OpenAI is the first implemented provider,
 and the provider adapter layer is designed so Anthropic, DeepSeek, or another
 tool-calling LLM can be added without changing the local file tools.
@@ -92,6 +110,9 @@ uses simple colors to distinguish user, tool, assistant, and error output.
 It also shows a lightweight thinking line with request-aware phrases while
 waiting on the model. Set `NO_COLOR=1` or pass `--plain` to disable ANSI colors
 and animation.
+In plain mode, the CLI prints `Assistant: Working...` every time it is waiting
+on the model, including after local tool results. Pass `--confirm-edits` to
+approve or reject each write.
 
 If you accidentally type input like `You: exit`, the CLI strips the leading
 `You:` prompt text automatically.
@@ -103,10 +124,69 @@ Session commands:
 - `/workspace`
 - `/exit`
 
+## Learning Workflow
+
+The safest way to learn how the agent edits code is to watch the tool trace:
+
+1. Ask for a small change.
+2. The model should inspect files with `read_file`.
+3. Before writing, it can call `preview_edit_file`.
+4. The CLI prints a unified diff showing removed lines with `-` and added lines with `+`.
+5. If the diff looks right, the model can call `edit_file` to apply the same change.
+6. With `--confirm-edits`, the CLI asks before the write is applied.
+7. For end-of-file additions, the model can use `append_file` instead of replacing text.
+8. For targeted additions, the model can use `insert_after` with an exact anchor.
+9. For targeted prepends, the model can use `insert_before` with an exact anchor.
+
+This mirrors a normal developer workflow: inspect, preview, then apply.
+After one successful write, or if you reject a write, or if a write tool fails,
+the current turn stops immediately. No extra write happens until you send a new
+request.
+
+## Try These Prompts
+
+Run with confirmations enabled:
+
+```bash
+python -m tiny_code_agent --plain --confirm-edits
+```
+
+Then try:
+
+```text
+Show me a small tree of this project.
+```
+
+```text
+Search for the hello function.
+```
+
+```text
+Update hello.py so hello() returns "Hello from the smoke test".
+```
+
+```text
+Append a short comment to the end of hello.py explaining that it is a smoke test file.
+```
+
+```text
+Insert a comment before the print(hello()) line explaining why the script prints the greeting.
+```
+
+For write prompts, the expected learning loop is: inspect, preview a diff, ask
+for confirmation, write only when you answer `y`, then stop the turn.
+
 ## Example
 
 ```text
 You: Create hello.py with a hello function.
+tool: preview_edit_file {"path": "hello.py", "old_str": "", "new_str": "..."}
+  result: ok
+  path: /path/to/workspace/hello.py
+  diff:
+    --- a/hello.py
+    +++ b/hello.py
+    +...
 tool: edit_file {"path": "hello.py", "old_str": "", "new_str": "..."}
 Assistant: Created hello.py with a hello function.
 ```
@@ -164,7 +244,13 @@ does not pollute later turns.
 ## Safety Limitations
 
 - File tools are restricted to the workspace root where the CLI starts.
+- Preview tools show unified diffs but do not write anything.
+- `--confirm-edits` asks for an explicit `y` or `n` before write tools run.
+  It is disabled by default.
 - `edit_file` only supports creating files or replacing the first exact string match.
+- `append_file`, `insert_after`, and `insert_before` only modify existing files.
+- Successful, rejected, and failed write tools stop the current turn instead of
+  continuing automatically.
 - Missing replacement text returns an error; the agent does not guess.
 - This version does not execute shell commands.
 - Review generated edits before using this on important code.
